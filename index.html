@@ -1,0 +1,35 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ACM 模板整理与打印</title>
+<link rel="stylesheet" href="css/app.css">
+</head><body>
+  <div id="switcher"><span class="st-title">ACM 训练台</span><button id="swTpl" class="sw-btn active">📁 模板库</button><button id="swTree" class="sw-btn">🌳 技能树</button></div>
+  <div id="viewTpl">
+  <header id="topbar">
+    <h1>ACM 模板整理</h1>
+    <button id="btnPickDir" class="btn ghost">选择模板目录</button>
+    <span id="dirLabel">未选择目录</span>
+    <span id="fileCount"></span>
+    <span class="spacer"></span>
+    <button id="btnNew" class="btn ghost">新建模板</button>
+    <button id="btnNewCat" class="btn ghost">新建分类</button>
+    <button id="btnPrint" class="btn">一键整理打印</button>
+  </header>
+  <div id="degradedBar" class="hidden">当前浏览器不支持文件系统目录访问，已启用只读降级模式：可选择本地文件夹浏览，并导出打印视图 HTML。</div>
+  <input type="text" id="searchBox" placeholder="搜索文件名或代码内容（内容仅匹配已打开过的文件）">
+  <main>
+    <aside id="categoryPanel"><h2>分类</h2><ul id="categoryList"></ul></aside>
+    <section id="filePanel"><h2>文件</h2><ul id="fileList"></ul></section>
+    <section id="previewPanel">
+      <div id="previewMeta"></div>
+      <pre id="codeView"><code></code></pre>
+      <textarea id="editArea" class="hidden" spellcheck="false"></textarea>
+    </section>
+  </main>
+  </div>
+  <div id="viewTree" class="hidden"><iframe id="treeFrame" src="skilltree.html?v=8" title="技能树"></iframe></div>
+  <input type="file" id="folderInput" webkitdirectory multiple hidden>
+  <div id="modal" class="hidden"><div id="modalBox"><div id="modalBody"></div><div id="modalBtns"><button id="modalOk" class="btn">确定</button><button id="modalCancel" class="btn ghost">取消</button></div></div></div>
+  <div id="toast"></div>
+  <div id="printOverlay" class="hidden"><div id="printBar"><span>打印预览</span><span style="flex:1"></span><button id="printDo" class="btn">打印 / 另存 PDF</button><button id="printClose" class="btn ghost">关闭</button></div><iframe id="printFrame"></iframe></div>
+<script src="js/app.js"></script>
+</body></html>
