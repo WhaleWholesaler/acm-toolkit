@@ -103,3 +103,22 @@ textarea{width:100%;min-height:56px;resize:vertical}
 .tog circle{fill:var(--panel);stroke-width:1.2}
 .tog text{fill:var(--txt);font-size:10.5px;pointer-events:none}
 .tierpill text{font-size:9.5px;font-weight:600}
+/* 练什么（智能抽取） */
+.pick-mask{position:fixed;inset:0;background:rgba(20,20,20,.45);display:flex;align-items:center;justify-content:center;z-index:120}
+.pick-box{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:16px 18px;width:min(560px,94vw);max-height:76vh;overflow:auto}
+.pick-box h3{font-size:15px;font-weight:600;margin:0 0 4px;text-transform:none;letter-spacing:0;color:var(--txt)}
+.pick-tip{color:var(--sub);font-size:12px;margin:0 0 10px}
+.pick-count{display:flex;align-items:center;gap:6px;margin:0 0 10px;font-size:12px;color:var(--sub)}
+.pick-list{display:flex;flex-direction:column;gap:8px}
+.pick-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:pointer;transition:border-color .15s,background .15s}
+.pick-card:hover{border-color:var(--acc);background:var(--hover)}
+.pick-head{display:flex;align-items:center;gap:2px;font-size:13px}
+.pick-head b{font-weight:600}
+.pick-score{margin-left:auto;font-weight:600;font-size:13px}
+.pick-sub{color:var(--sub);font-size:11px;margin:3px 0 5px}
+.pick-chips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:5px}
+.pick-chip{background:var(--line2);color:var(--sub);border-radius:9px;padding:0 8px;font-size:11px;line-height:17px}
+.pick-desc{font-size:12px;opacity:.85;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pick-empty{color:var(--sub);font-size:12px;text-align:center;padding:14px 0}
+.pick-note{color:var(--sub);font-size:11px;margin:6px 0 0}
+.pick-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}

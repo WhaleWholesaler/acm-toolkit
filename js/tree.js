@@ -487,6 +487,153 @@ document.getElementById('importFile').onchange=e=>{const f=e.target.files[0];if(
 document.getElementById('resetBtn').onclick=()=>{if(confirm('确定清空所有进度？建议先导出备份。')){S=defaultS();render();}};
 let toastT=null;function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
+/* ================= 练什么（智能抽取） ================= */
+const PICK_KEY='acm_skilltree_picks',PICK_SCOPE_KEY='acm_skilltree_scope',PICK_CUR_KEY='acm_skilltree_current',PICK_NUMS=[3,4,5];
+let pickMask=null,pickCount=4,pickList=[],pickScope=(()=>{try{return localStorage.getItem(PICK_SCOPE_KEY)==='frontier'?'frontier':'practiced';}catch(e){return 'practiced';}})();
+function readPicks(){try{const a=JSON.parse(localStorage.getItem(PICK_KEY));return Array.isArray(a)?a:[];}catch(e){return [];}}
+function writePicks(a){try{localStorage.setItem(PICK_KEY,JSON.stringify(a));}catch(e){}}
+function focusTier(){
+  for(const t of [1,2,3]){
+    const ls=LEAVES.filter(n=>n.t===t);
+    const avg=ls.length?ls.reduce((x,n)=>x+n.calc.score,0)/ls.length:0;
+    if(ls.length&&avg<75)return t;
+  }
+  return 3;
+}
+function frontierTier(){
+  for(const t of [1,2,3]){
+    const ls=LEAVES.filter(n=>n.t===t);
+    const avg=ls.length?ls.reduce((x,n)=>x+n.calc.score,0)/ls.length:0;
+    if(ls.length&&avg<85)return t;
+  }
+  return 3;
+}
+function majorOf(n){let x=n;while(x&&x.depth!==2&&x.p)x=N[x.p];return x?x.id:'';}
+function levelOf(n){const s=S.nodes[n.id];return s&&s.level?s.level:0;}
+function pickPool(k){
+  const base=LEAVES.filter(n=>!n.locked),cap=Math.min(maxTier,3),fr=frontierTier();
+  const tOk=n=>n.t<=cap,dirOk=n=>dirF==='all'||n.dirv===dirF||n.dirv==='a',blkOk=n=>blockF==='all'||(n.block&&n.block.id===blockF),scopeOk=n=>pickScope==='practiced'?n.calc.base>0:(n.calc.base>0||n.t<=fr);
+  let p=base.filter(n=>tOk(n)&&dirOk(n)&&blkOk(n)&&scopeOk(n));
+  if(p.length<k)p=base.filter(n=>tOk(n)&&dirOk(n)&&scopeOk(n));
+  if(p.length<k)p=base.filter(n=>tOk(n)&&scopeOk(n));
+  if(p.length<k&&maxTier>=4)p=base.filter(scopeOk);
+  return p;
+}
+function pickWeight(n,focus,hist){
+  const c=n.calc;
+  let w=0.25+1.2*(1-Math.min(1,c.score/85));
+  if(c.solved===0)w+=0.5;
+  if(c.solved>0&&c.ret<0.7)w+=1.1*(1-c.ret)*Math.min(1,(c.days||0)/30+0.3);
+  w*=n.t===focus?1.6:n.t===focus+1?0.9:n.t<focus?0.5:n.t===4?0.15:0.55;
+  if(hist.has(n.id))w*=0.12;
+  return w>0?w:0;
+}
+function pickReasons(n,focus){
+  const c=n.calc,r=[];
+  if(c.solved===0)r.push(levelOf(n)>0?'待实战':'未开始');
+  else if(c.ret<0.6&&c.days>=14)r.push('久未复习');
+  else if(c.score<50)r.push('刚起步');
+  else if(c.score<85)r.push('待巩固');
+  else r.push('已掌握·复习');
+  if(n.t===focus)r.push('主攻层');
+  else if(n.t===focus+1)r.push('进阶挑战');
+  return r;
+}
+function pickKnowledgePoints(k,exclude){
+  calcAll();
+  const focus=focusTier(),prev=readPicks(),hist=new Set(prev),ex=exclude instanceof Set?exclude:new Set(exclude||[]),out=[];
+  let pool=pickPool(k);
+  const poolN=pool.length;
+  if(poolN-ex.size>=k)pool=pool.filter(n=>!ex.has(n.id));
+  out.focus=focus;out.pool=poolN;
+  if(!pool.length)return out;
+  const cnt=Math.min(k,pool.length),remain=pool.slice(),discount={};
+  while(out.length<cnt){
+    let best=null,bestKey=-Infinity;
+    remain.forEach(n=>{
+      const w=pickWeight(n,focus,hist)*(discount[n.id]||1);
+      if(!(w>0))return;
+      const key=Math.pow(Math.random(),1/w);
+      if(key>bestKey){bestKey=key;best=n;}
+    });
+    if(!best)best=remain[Math.floor(Math.random()*remain.length)];
+    out.push(best);
+    remain.splice(remain.indexOf(best),1);
+    const bb=best.block?best.block.id:'',bm=majorOf(best);
+    remain.forEach(n=>{
+      let d=discount[n.id]||1;
+      if(bb&&n.block&&n.block.id===bb)d*=0.35;
+      if(bm&&majorOf(n)===bm)d*=0.25;
+      discount[n.id]=d;
+    });
+  }
+  writePicks(out.map(n=>n.id).concat(prev).slice(0,40));
+  return out;
+}
+function closePickModal(){
+  if(!pickMask)return;
+  pickMask.remove();pickMask=null;
+  window.removeEventListener('keydown',pickEsc);
+}
+function pickEsc(e){if(e.key==='Escape')closePickModal();}
+function renderPickModal(){
+  const box=pickMask&&pickMask.querySelector('.pick-box');
+  if(!box)return;
+  const cards=pickList.map(n=>{
+    const rs=pickReasons(n,pickList.focus);
+    return `<div class="pick-card" data-go="${n.id}">
+      <div class="pick-head"><span class="tag t${n.t}">${TIERN[n.t]}</span><b>${esc(n.n)}</b><span class="pick-score" style="color:${color(n.calc.score)}">${n.calc.score}</span></div>
+      <div class="pick-sub">${esc(pathOf(n))} · ${status(n)}</div>
+      <div class="pick-chips">${rs.map(r=>`<span class="pick-chip">${r}</span>`).join('')}</div>
+      <div class="pick-desc">${esc(n.d)}</div>
+    </div>`;
+  }).join('');
+  const empty=pickScope==='practiced'?'还没有记录或自评过的知识点可抽：先记录几道题 / 给知识点自评，或切到「含新知识点」。':'当前筛选下暂无可抽取的知识点，请放宽筛选后重试。';
+  const poolN=pickList.pool!=null?pickList.pool:pickList.length;
+  const short=pickList.length&&pickList.length<pickCount;
+  const small=!short&&poolN<pickCount*2;
+  const scopeWord=pickScope==='practiced'?'练过或自评过的':'可抽的';
+  const tail=pickScope==='practiced'?'想更多可切「含新知识点」或先多记录几题。':'可放宽筛选或先在树里多记录练习。';
+  const shortNote=short
+    ?`当前范围只有 ${poolN} 个${scopeWord}知识点，已全部展示；${tail}`
+    :`当前范围只有 ${poolN} 个${scopeWord}知识点，换一批只能在这几个之间轮换；${tail}`;
+  box.innerHTML=`<h3>🎲 今天练什么</h3>
+    <p class="pick-tip">默认只抽有记录或自评过（掌握程度不为 0）的知识点：优先薄弱、久未复习；「含新知识点」会加入${TIERN[frontierTier()]}牌层未开始的。</p>
+    <div class="pick-count"><span>抽取范围</span><button class="mini${pickScope==='practiced'?' pri':''}" data-scope="practiced">已练过/自评</button><button class="mini${pickScope==='frontier'?' pri':''}" data-scope="frontier">含新知识点</button></div>
+    <div class="pick-count"><span>抽取数量</span>${PICK_NUMS.map(x=>`<button class="mini${x===pickCount?' pri':''}" data-cnt="${x}">${x}</button>`).join('')}</div>
+    <div class="pick-list">${cards||`<p class="pick-empty">${empty}</p>`}</div>
+    ${short||small?`<p class="pick-note">${shortNote}</p>`:''}
+    <div class="pick-btns"><button class="pri" id="pickReroll">换一批</button><button id="pickClose">关闭</button></div>`;
+  box.querySelector('#pickReroll').onclick=pickReroll;
+  box.querySelector('#pickClose').onclick=closePickModal;
+  box.querySelectorAll('[data-cnt]').forEach(b=>b.onclick=()=>{pickCount=+b.dataset.cnt;pickReroll();});
+  box.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>setPickScope(b.dataset.scope));
+  box.querySelectorAll('.pick-card').forEach(c=>c.onclick=()=>{const id=c.dataset.go;S.sel=id;expandTo(id);render();closePickModal();});
+}
+function readCurrent(){try{const o=JSON.parse(localStorage.getItem(PICK_CUR_KEY));return o&&Array.isArray(o.ids)&&o.ids.length?o:null;}catch(e){return null;}}
+function writeCurrent(){try{localStorage.setItem(PICK_CUR_KEY,JSON.stringify({ids:pickList.map(n=>n.id),scope:pickScope,count:pickCount,at:Date.now()}));}catch(e){}}
+function pickReroll(){pickList=pickKnowledgePoints(pickCount,pickList.length?new Set(pickList.map(n=>n.id)):null);writeCurrent();renderPickModal();}
+function setPickScope(s){pickScope=s;try{localStorage.setItem(PICK_SCOPE_KEY,s);}catch(e){}pickReroll();}
+function openPickModal(){
+  if(pickMask)return;
+  pickMask=document.createElement('div');pickMask.className='pick-mask';
+  const box=document.createElement('div');box.className='pick-box';
+  pickMask.appendChild(box);document.body.appendChild(pickMask);
+  pickMask.onclick=e=>{if(e.target===pickMask)closePickModal();};
+  window.addEventListener('keydown',pickEsc);
+  const saved=readCurrent(),list=saved?saved.ids.map(id=>N[id]).filter(n=>n):[];
+  if(list.length){
+    calcAll();
+    list.focus=focusTier();
+    list.pool=pickPool(pickCount).length;
+    pickList=list;
+    if(saved.scope==='frontier'||saved.scope==='practiced')pickScope=saved.scope;
+    if(PICK_NUMS.includes(saved.count))pickCount=saved.count;
+    renderPickModal();
+  } else pickReroll();
+}
+document.getElementById('pickBtn').onclick=openPickModal;
+
 /* ================= 左侧总览 ================= */
 function tier(t){const ls=LEAVES.filter(n=>n.t===t);const m=ls.filter(n=>n.calc.score>=85).length;return {n:ls.length,m,avg:ls.length?Math.round(ls.reduce((x,n)=>x+n.calc.score,0)/ls.length):0};}
 function renderLeft(){

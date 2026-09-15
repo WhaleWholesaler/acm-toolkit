@@ -10,7 +10,7 @@ namespace AcmToolkit
 {
     internal static class Program
     {
-        internal const string Stamp = "v2";
+        internal const string Stamp = "v8";
 
         [STAThread]
         private static void Main(string[] args)
