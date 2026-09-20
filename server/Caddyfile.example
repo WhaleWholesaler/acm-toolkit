@@ -1,0 +1,8 @@
+# 方案 A（无域名）：把 <公网IP> 替换为服务器公网 IP
+# sslip.io 会把 <IP>.sslip.io 解析到该 IP，Caddy 自动签发证书
+<公网IP>.sslip.io {
+    reverse_proxy 127.0.0.1:8787
+}
+
+# 方案 B（有域名 + Cloudflare Tunnel）：不需要开放 80/443，用 cloudflared 隧道，
+# 本文件可留空不用；直接按 DEPLOY.md 第 5.5 节操作。

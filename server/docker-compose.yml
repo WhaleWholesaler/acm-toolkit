@@ -1,0 +1,16 @@
+services:
+  acm-sync:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      - REGISTER_MODE=open
+      - ALLOWED_ORIGINS=*
+      - TRUST_PROXY=1
+      - DATA_DIR=/data
+      # - STATIC_DIR=/www
+    volumes:
+      - ./data:/data
+      # 可选：同源托管前端（把仓库根目录挂进来，并启用下面的 STATIC_DIR）
+      # - ..:/www:ro

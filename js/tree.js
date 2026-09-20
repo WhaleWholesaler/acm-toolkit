@@ -510,7 +510,7 @@ function validateState(o){
   const nodes={};
   for(const [id,s] of Object.entries(o.nodes)){
     if(!N[id]||!s||typeof s!=='object')continue;
-    nodes[id]={level:Math.min(3,Math.max(0,Math.round(+s.level)||0)),target:Math.max(1,Math.round(+s.target)||N[id].tg),note:typeof s.note==='string'?s.note:'',at:+s.at||0,logs:Array.isArray(s.logs)?s.logs.filter(l=>l&&typeof l==='object'):[]};
+    nodes[id]={level:Math.min(3,Math.max(0,Math.round(+s.level)||0)),target:Math.max(1,Math.round(+s.target)||N[id].tg),note:typeof s.note==='string'?s.note:'',at:+s.at||0,lvlAt:+s.lvlAt||0,tgtAt:+s.tgtAt||0,noteAt:+s.noteAt||0,logs:Array.isArray(s.logs)?s.logs.filter(l=>l&&typeof l==='object'):[]};
   }
   return {ver:2,nodes,collapsed:defaultCollapsed(),sel:null};
 }
@@ -766,11 +766,11 @@ function renderRight(){
   <h3>刷题日志 (${s.logs.length})</h3>
   ${s.logs.slice().reverse().map((l,i)=>`<div class="log"><span><b>${esc(l.p||'?')}</b> ${l.r?'· '+esc(l.r):''} <small style="color:var(--sub)">${esc(l.d)} ${l.how==='sol'?'· 看题解':'· 独立'}</small>${l.n?'<br><small>'+esc(l.n)+'</small>':''}</span><button data-del="${s.logs.length-1-i}">×</button></div>`).join('')||'<small style="color:var(--sub)">还没有记录</small>'}
   <h3>备注 / 板子链接</h3><textarea id="note">${esc(s.note||'')}</textarea>`;
-  R.querySelector('#lv').onchange=e=>{s.level=+e.target.value;s.at=S.at=Date.now();render();};
-  R.querySelector('#tgt').onchange=e=>{s.target=Math.max(1,+e.target.value||n.tg);s.at=S.at=Date.now();render();};
+  R.querySelector('#lv').onchange=e=>{s.level=+e.target.value;s.lvlAt=S.at=Date.now();render();};
+  R.querySelector('#tgt').onchange=e=>{s.target=Math.max(1,+e.target.value||n.tg);s.tgtAt=S.at=Date.now();render();};
   const noteEl=R.querySelector('#note');
-  noteEl.oninput=e=>{const v=e.target.value;clearTimeout(noteTimer);noteTimer=setTimeout(()=>{s.note=v;s.at=S.at=Date.now();save();},300);};
-  noteEl.onchange=e=>{clearTimeout(noteTimer);s.note=e.target.value;s.at=S.at=Date.now();save();};
+  noteEl.oninput=e=>{const v=e.target.value;clearTimeout(noteTimer);noteTimer=setTimeout(()=>{s.note=v;s.noteAt=S.at=Date.now();save();},300);};
+  noteEl.onchange=e=>{clearTimeout(noteTimer);s.note=e.target.value;s.noteAt=S.at=Date.now();save();};
   R.querySelector('#addLog').onclick=()=>{s.logs.push({id:logId(),at:Date.now(),p:R.querySelector('#lp').value.trim(),r:R.querySelector('#lr').value,d:R.querySelector('#ld').value||today,how:R.querySelector('#lh').value,n:R.querySelector('#ln').value.trim()});s.at=S.at=Date.now();render();};
   R.querySelector('#quick').onclick=()=>{s.logs.push({id:logId(),at:Date.now(),p:'',r:'',d:today,how:'ac',n:''});s.at=S.at=Date.now();render();};
   R.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{s.logs.splice(+b.dataset.del,1);s.at=S.at=Date.now();render();});

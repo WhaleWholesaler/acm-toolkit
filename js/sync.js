@@ -48,6 +48,16 @@ function logKey(l) {
 const parse = s => { if (s == null) return null; if (typeof s === 'object') return s; try { return JSON.parse(s); } catch (e) { return null; } };
 
 /* ---------------- 合并：技能树 ---------------- */
+function fieldAt(x, key) { const v = Number(x && x[key]); return Number.isFinite(v) && v > 0 ? v : 0; }
+function pickField(x, y, field, atKey, cmp) {
+  const xv = x[field], yv = y[field];
+  if (xv === yv) return xv;
+  if (xv === undefined) return yv;
+  if (yv === undefined) return xv;
+  const xa = fieldAt(x, atKey), ya = fieldAt(y, atKey);
+  if (xa !== ya) return xa > ya ? xv : yv;
+  return cmp ? cmp(xv, yv) : xv;
+}
 function mergeTreeState(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -58,18 +68,24 @@ function mergeTreeState(a, b) {
     const x = an[id], y = bn[id];
     if (!x) { out.nodes[id] = y; return; }
     if (!y) { out.nodes[id] = x; return; }
-    const xn = x.at || 0, yn = y.at || 0;
-    const newer = xn >= yn ? x : y, older = xn >= yn ? y : x;
     const logs = new Map();
     [x, y].forEach(src => (src.logs || []).forEach(l => {
       const k = logKey(l), cur = logs.get(k);
       if (!cur || (l.at || 0) > (cur.at || 0)) logs.set(k, Object.assign({}, l, { id: l.id || k.replace(/^L/, '') }));
     }));
     out.nodes[id] = {
-      level: newer.level != null ? newer.level : 0,
-      target: newer.target != null ? newer.target : older.target,
-      note: newer.note != null ? newer.note : (older.note != null ? older.note : ''),
-      at: Math.max(xn, yn),
+      level: pickField(x, y, 'level', 'lvlAt', (p, q) => Math.max(Number(p) || 0, Number(q) || 0)),
+      target: pickField(x, y, 'target', 'tgtAt', (p, q) => Math.max(Number(p) || 0, Number(q) || 0)),
+      note: pickField(x, y, 'note', 'noteAt', (p, q) => {
+        const sp = String(p || ''), sq = String(q || '');
+        if ((sp ? 1 : 0) !== (sq ? 1 : 0)) return sp ? p : q;
+        if (sp.length !== sq.length) return sp.length > sq.length ? p : q;
+        return sp >= sq ? p : q;
+      }),
+      lvlAt: Math.max(fieldAt(x, 'lvlAt'), fieldAt(y, 'lvlAt')),
+      tgtAt: Math.max(fieldAt(x, 'tgtAt'), fieldAt(y, 'tgtAt')),
+      noteAt: Math.max(fieldAt(x, 'noteAt'), fieldAt(y, 'noteAt')),
+      at: Math.max(Number(x.at) || 0, Number(y.at) || 0),
       logs: Array.from(logs.values()).sort((p, q) => { const a = p.d || '', b = q.d || ''; return a < b ? -1 : a > b ? 1 : 0; })
     };
   });

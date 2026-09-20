@@ -1,0 +1,24 @@
+[Unit]
+Description=ACM Toolkit Sync Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/acm-toolkit/server
+ExecStart=/usr/bin/node /opt/acm-toolkit/server/server.js
+Environment=PORT=8787
+Environment=HOST=127.0.0.1
+Environment=DATA_DIR=/var/lib/acm-sync
+Environment=REGISTER_MODE=open
+Environment=ALLOWED_ORIGINS=*
+Environment=TRUST_PROXY=1
+Environment=STATIC_DIR=/opt/acm-toolkit
+Restart=always
+RestartSec=2
+User=acmsync
+Group=acmsync
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
