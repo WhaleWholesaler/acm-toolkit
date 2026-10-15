@@ -346,6 +346,8 @@ function bcolor(n){return n.block?cssv(BLOCK_COLOR[n.block.id]||'--acc'):cssv('-
 const TIERN={1:'铜',2:'银',3:'金',4:'了解'};
 const TIERS={1:'铜',2:'银',3:'金',4:'了'};
 const DIRN={a:'通用',g:'图论 / DS',m:'数学',d:'DP / 字符串'};
+const DIRECTION_KEY='acm_skilltree_direction';
+function readDirection(){try{const d=localStorage.getItem(DIRECTION_KEY);return ['g','m','d'].includes(d)?d:'all';}catch(e){return 'all';}}
 
 /* ================= 状态（v2，自动迁移 v1） ================= */
 const KEY='acm_skilltree_v2',OLDKEY='acm_skilltree_v1';
@@ -410,7 +412,7 @@ document.getElementById('themeBtn').onclick=()=>{THEME=THEME==='dark'?'light':'d
 
 /* ================= 布局 & 渲染 ================= */
 const svg=document.getElementById('svg'),vp=document.getElementById('vp');
-let T={x:40,y:30,k:1},maxTier=4,blockF='all',dirF='all',q='';
+let T={x:40,y:30,k:1},maxTier=4,blockF='all',dirF=readDirection(),q='';
 const ROW=44,GAP=64;
 const H={0:44,1:44,2:38,3:34};
 function tw(s){let w=0;for(const ch of s)w+=ch.charCodeAt(0)>255?12.5:7;return w;}
@@ -499,7 +501,8 @@ document.getElementById('fit').onclick=fitView;
 document.getElementById('tierSel').onchange=e=>{maxTier=+e.target.value;render();};
 const blockSel=document.getElementById('blockSel');BLOCKS.forEach(b=>{const o=document.createElement('option');o.value=b.id;o.textContent=b.n;blockSel.appendChild(o);});
 blockSel.onchange=e=>{blockF=e.target.value;render();setTimeout(fitView,0);};
-document.getElementById('dirSel').onchange=e=>{dirF=e.target.value;render();};
+document.getElementById('dirSel').value=dirF;
+document.getElementById('dirSel').onchange=e=>setDirection(e.target.value);
 document.getElementById('search').oninput=e=>{q=e.target.value.trim().toLowerCase();render();};
 document.getElementById('expandAll').onclick=()=>{S.collapsed={};render();setTimeout(fitView,0);};
 document.getElementById('collapseAll').onclick=()=>{S.collapsed=defaultCollapsed();render();setTimeout(fitView,0);};
@@ -515,17 +518,59 @@ function validateState(o){
   return {ver:2,nodes,collapsed:defaultCollapsed(),sel:null};
 }
 document.getElementById('importFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const v=validateState(JSON.parse(rd.result));if(!v)throw 0;if(!confirm('导入将覆盖当前全部进度，确定继续？（建议先导出备份）'))return;S=v;render();toast('已导入');}catch(err){alert('文件格式错误');}};rd.readAsText(f);e.target.value='';};
-document.getElementById('resetBtn').onclick=()=>{if(confirm('确定清空所有进度？建议先导出备份。')){S=defaultS();try{localStorage.removeItem(PICK_KEY);localStorage.removeItem(PICK_CUR_KEY);}catch(e){}render();}};
+document.getElementById('resetBtn').onclick=()=>{if(confirm('确定清空所有进度？建议先导出备份。')){S=defaultS();resetPicks();render();}};
 let toastT=null;function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ================= 练什么（智能抽取） ================= */
 const PICK_KEY='acm_skilltree_picks',PICK_SCOPE_KEY='acm_skilltree_scope',PICK_CUR_KEY='acm_skilltree_current',PICK_NUMS=[3,4,5];
-let pickMask=null,pickCount=4,pickList=[],pickScope=(()=>{try{return localStorage.getItem(PICK_SCOPE_KEY)==='frontier'?'frontier':'practiced';}catch(e){return 'practiced';}})();
-function readPicks(){try{const a=JSON.parse(localStorage.getItem(PICK_KEY));return Array.isArray(a)?a:[];}catch(e){return [];}}
-function writePicks(a){try{localStorage.setItem(PICK_KEY,JSON.stringify(a));}catch(e){}}
+const PICK_DIRS=['all','g','m','d'];
+let pickMask=null,pickCount=4,pickList=[],pickScope='practiced',pickDoc=readCurrent();
+function inDirection(n,dir=dirF){return dir==='all'||n.dirv===dir||n.dirv==='a';}
+function cleanPickIds(ids,dir,limit){return Array.isArray(ids)?[...new Set(ids.filter(id=>typeof id==='string'&&Object.hasOwn(N,id)&&N[id].t>0&&inDirection(N[id],dir)))].slice(0,limit):[];}
+function emptyPick(){return {ids:[],history:[],scope:'practiced',count:4,at:0};}
+function readCurrent(){
+  const doc={ver:2,byDir:{},at:0};
+  try{
+    const o=JSON.parse(localStorage.getItem(PICK_CUR_KEY));
+    let entries=o&&o.ver===2&&o.byDir&&typeof o.byDir==='object'?o.byDir:null;
+    if(!entries){
+      let history=[];try{history=JSON.parse(localStorage.getItem(PICK_KEY)||'[]');}catch(e){}
+      const legacy=o&&Array.isArray(o.ids)?o:null;
+      if(legacy||Array.isArray(history)&&history.length||localStorage.getItem(PICK_SCOPE_KEY)==='frontier')entries={all:{...emptyPick(),scope:localStorage.getItem(PICK_SCOPE_KEY),...legacy,history}};
+    }
+    PICK_DIRS.forEach(dir=>{
+      const e=entries&&entries[dir];if(!e||typeof e!=='object')return;
+      const at=Number.isFinite(e.at)&&e.at>0?e.at:0;
+      doc.byDir[dir]={ids:cleanPickIds(e.ids,dir,5),history:cleanPickIds(e.history,dir,40),scope:e.scope==='frontier'?'frontier':'practiced',count:PICK_NUMS.includes(e.count)?e.count:4,at};
+      doc.at=Math.max(doc.at,at);
+    });
+  }catch(e){}
+  return doc;
+}
+function currentPick(){return pickDoc.byDir[dirF]||(pickDoc.byDir[dirF]=emptyPick());}
+function refreshPicks(){
+  const latest=readCurrent();
+  PICK_DIRS.forEach(dir=>{const e=latest.byDir[dir];if(e&&(!pickDoc.byDir[dir]||e.at>pickDoc.byDir[dir].at))pickDoc.byDir[dir]=e;});
+}
+function writeCurrent(){
+  const e=currentPick(),at=e.at;
+  refreshPicks();
+  e.at=Math.max(Date.now(),at+1,currentPick().at+1);
+  pickDoc.byDir[dirF]=e;
+  pickDoc.at=Math.max(...Object.values(pickDoc.byDir).map(p=>p.at));
+  try{localStorage.setItem(PICK_CUR_KEY,JSON.stringify(pickDoc));}catch(err){}
+}
+function rememberPicks(nodes){const e=currentPick();e.history=[...new Set(nodes.map(n=>n.id).concat(e.history))].slice(0,40);}
+function resetPicks(){
+  const at=Math.max(Date.now(),pickDoc.at+1);
+  pickDoc={ver:2,byDir:Object.fromEntries(PICK_DIRS.map(dir=>[dir,{...emptyPick(),at}])),at};
+  pickList=[];pickCount=4;pickScope='practiced';
+  try{localStorage.removeItem(PICK_KEY);localStorage.removeItem(PICK_SCOPE_KEY);localStorage.setItem(PICK_CUR_KEY,JSON.stringify(pickDoc));}catch(e){}
+  renderPickModal();
+}
 function focusTier(){
   for(const t of [1,2,3]){
-    const ls=LEAVES.filter(n=>n.t===t);
+    const ls=LEAVES.filter(n=>n.t===t&&inDirection(n));
     const avg=ls.length?ls.reduce((x,n)=>x+n.calc.score,0)/ls.length:0;
     if(ls.length&&avg<75)return t;
   }
@@ -533,7 +578,7 @@ function focusTier(){
 }
 function frontierTier(){
   for(const t of [1,2,3]){
-    const ls=LEAVES.filter(n=>n.t===t);
+    const ls=LEAVES.filter(n=>n.t===t&&inDirection(n));
     const avg=ls.length?ls.reduce((x,n)=>x+n.calc.score,0)/ls.length:0;
     if(ls.length&&avg<85)return t;
   }
@@ -541,14 +586,9 @@ function frontierTier(){
 }
 function majorOf(n){let x=n;while(x&&x.depth!==2&&x.p)x=N[x.p];return x?x.id:'';}
 function levelOf(n){const s=S.nodes[n.id];return s&&s.level?s.level:0;}
-function pickPool(k){
-  const base=LEAVES.filter(n=>!n.locked),cap=Math.min(maxTier,3),fr=frontierTier();
-  const tOk=n=>n.t<=cap,dirOk=n=>dirF==='all'||n.dirv===dirF||n.dirv==='a',blkOk=n=>blockF==='all'||(n.block&&n.block.id===blockF),scopeOk=n=>pickScope==='practiced'?n.calc.base>0:(n.calc.base>0||n.t<=fr);
-  let p=base.filter(n=>tOk(n)&&dirOk(n)&&blkOk(n)&&scopeOk(n));
-  if(p.length<k)p=base.filter(n=>tOk(n)&&dirOk(n)&&scopeOk(n));
-  if(p.length<k)p=base.filter(n=>tOk(n)&&scopeOk(n));
-  if(p.length<k&&maxTier>=4)p=base.filter(scopeOk);
-  return p;
+function pickPool(){
+  const cap=Math.min(maxTier,3),fr=frontierTier();
+  return LEAVES.filter(n=>!n.locked&&n.t<=cap&&inDirection(n)&&(blockF==='all'||n.block&&n.block.id===blockF)&&(pickScope==='practiced'?n.calc.base>0:n.calc.base>0||n.t<=fr));
 }
 function pickWeight(n,focus,hist){
   const c=n.calc;
@@ -570,16 +610,13 @@ function pickReasons(n,focus){
   else if(n.t===focus+1)r.push('进阶挑战');
   return r;
 }
-function pickKnowledgePoints(k,exclude){
+function pickKnowledgePoints(k,exclude,allowPrevious=false){
   calcAll();
-  const focus=focusTier(),prev=readPicks(),hist=new Set(prev),ex=exclude instanceof Set?exclude:new Set(exclude||[]),out=[];
-  let pool=pickPool(k);
-  const poolN=pool.length;
-  if(poolN-ex.size>=k)pool=pool.filter(n=>!ex.has(n.id));
-  out.focus=focus;out.pool=poolN;
-  if(!pool.length)return out;
-  const cnt=Math.min(k,pool.length),remain=pool.slice(),discount={};
+  const focus=focusTier(),hist=new Set(currentPick().history),ex=new Set(exclude||[]),out=[],pool=pickPool();
+  const remain=pool.filter(n=>!ex.has(n.id)),previous=allowPrevious?pool.filter(n=>ex.has(n.id)):[],discount={};
+  const cnt=Math.min(k,remain.length+previous.length);
   while(out.length<cnt){
+    if(!remain.length)remain.push(...previous.splice(0));
     let best=null,bestKey=-Infinity;
     remain.forEach(n=>{
       const w=pickWeight(n,focus,hist)*(discount[n.id]||1);
@@ -598,8 +635,27 @@ function pickKnowledgePoints(k,exclude){
       discount[n.id]=d;
     });
   }
-  writePicks(out.map(n=>n.id).concat(prev).slice(0,40));
   return out;
+}
+// ids 保留本批次最多 5 个位置；减小数量只隐藏尾项，增大时恢复或补齐。
+function syncPickList(fill=false){
+  calcAll();
+  const e=currentPick();pickCount=e.count;pickScope=e.scope;
+  let changed=false;
+  if(fill&&e.ids.length<pickCount){
+    const more=pickKnowledgePoints(pickCount-e.ids.length,e.ids);
+    if(more.length){e.ids.push(...more.map(n=>n.id));rememberPicks(more);changed=true;}
+  }
+  pickList=e.ids.slice(0,pickCount).map(id=>N[id]);
+  pickList.focus=focusTier();pickList.pool=pickPool().length;
+  return changed;
+}
+function setDirection(dir){
+  if(!PICK_DIRS.includes(dir)||dir===dirF)return;
+  dirF=dir;document.getElementById('dirSel').value=dir;
+  try{localStorage.setItem(DIRECTION_KEY,dir);}catch(e){}
+  render();
+  if(pickMask){refreshPicks();const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);if(changed||!e.at)writeCurrent();renderPickModal();}
 }
 function closePickModal(){
   if(!pickMask)return;
@@ -619,32 +675,36 @@ function renderPickModal(){
       <div class="pick-desc">${esc(n.d)}</div>
     </div>`;
   }).join('');
-  const empty=pickScope==='practiced'?'还没有记录或自评过的知识点可抽：先记录几道题 / 给知识点自评，或切到「含新知识点」。':'当前筛选下暂无可抽取的知识点，请放宽筛选后重试。';
+  const empty=pickScope==='practiced'?'当前方向和筛选下还没有练过或自评过的知识点：先记录 / 自评，或切到「含新知识点」。':'当前方向和筛选下暂无可抽取的知识点，可调整板块或目标层级。';
   const poolN=pickList.pool!=null?pickList.pool:pickList.length;
-  const short=pickList.length&&pickList.length<pickCount;
-  const small=!short&&poolN<pickCount*2;
-  const scopeWord=pickScope==='practiced'?'练过或自评过的':'可抽的';
-  const tail=pickScope==='practiced'?'想更多可切「含新知识点」或先多记录几题。':'可放宽筛选或先在树里多记录练习。';
+  const short=pickList.length>0&&pickList.length<pickCount;
+  const small=pickList.length>0&&!short&&poolN<pickCount*2;
+  const tail=pickScope==='practiced'?'可切「含新知识点」或补充本方向的练习记录。':'可调整板块、目标层级，或补充本方向的练习记录。';
   const shortNote=short
-    ?`当前范围只有 ${poolN} 个${scopeWord}知识点，已全部展示；${tail}`
-    :`当前范围只有 ${poolN} 个${scopeWord}知识点，换一批只能在这几个之间轮换；${tail}`;
+    ?`本批保留 ${pickList.length} 个知识点，当前候选不足以补到 ${pickCount} 个；${tail}`
+    :`当前候选只有 ${poolN} 个，换一批可能重复；${tail}`;
   box.innerHTML=`<h3>🎲 今天练什么</h3>
-    <p class="pick-tip">默认只抽有记录或自评过（掌握程度不为 0）的知识点：优先薄弱、久未复习；「含新知识点」会加入${TIERN[frontierTier()]}牌层未开始的。</p>
+    <div class="pick-count pick-directions"><span>个人方向</span>${PICK_DIRS.map(dir=>`<button class="mini${dir===dirF?' pri':''}" data-pick-dir="${dir}" aria-pressed="${dir===dirF}">${dir==='all'?'综合':DIRN[dir]+'手'}</button>`).join('')}</div>
+    <p class="pick-tip">${dirF==='all'?'综合方向覆盖所有方向。':'只推荐本方向与通用基础，候选不足时少推几个。'}优先薄弱、久未复习；「含新知识点」加入本方向${TIERN[frontierTier()]}牌层未开始的知识点。</p>
     <div class="pick-count"><span>抽取范围</span><button class="mini${pickScope==='practiced'?' pri':''}" data-scope="practiced">已练过/自评</button><button class="mini${pickScope==='frontier'?' pri':''}" data-scope="frontier">含新知识点</button></div>
     <div class="pick-count"><span>抽取数量</span>${PICK_NUMS.map(x=>`<button class="mini${x===pickCount?' pri':''}" data-cnt="${x}">${x}</button>`).join('')}</div>
+    <p class="pick-tip">当前批次保留到主动「换一批」；增加数量只补缺项，减少后可恢复。范围与树上筛选用于补题和下一批，不会替换已抽标签。各方向的批次和设置随账号同步。</p>
     <div class="pick-list">${cards||`<p class="pick-empty">${empty}</p>`}</div>
     ${short||small?`<p class="pick-note">${shortNote}</p>`:''}
     <div class="pick-btns"><button class="pri" id="pickReroll">换一批</button><button id="pickClose">关闭</button></div>`;
   box.querySelector('#pickReroll').onclick=pickReroll;
   box.querySelector('#pickClose').onclick=closePickModal;
-  box.querySelectorAll('[data-cnt]').forEach(b=>b.onclick=()=>{pickCount=+b.dataset.cnt;pickReroll();});
+  box.querySelectorAll('[data-pick-dir]').forEach(b=>b.onclick=()=>setDirection(b.dataset.pickDir));
+  box.querySelectorAll('[data-cnt]').forEach(b=>b.onclick=()=>setPickCount(+b.dataset.cnt));
   box.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>setPickScope(b.dataset.scope));
   box.querySelectorAll('.pick-card').forEach(c=>c.onclick=()=>{const id=c.dataset.go;S.sel=id;expandTo(id);render();closePickModal();});
 }
-function readCurrent(){try{const o=JSON.parse(localStorage.getItem(PICK_CUR_KEY));return o&&Array.isArray(o.ids)&&o.ids.length?o:null;}catch(e){return null;}}
-function writeCurrent(){try{localStorage.setItem(PICK_CUR_KEY,JSON.stringify({ids:pickList.map(n=>n.id),scope:pickScope,count:pickCount,at:Date.now()}));}catch(e){}}
-function pickReroll(){pickList=pickKnowledgePoints(pickCount,pickList.length?new Set(pickList.map(n=>n.id)):null);writeCurrent();renderPickModal();}
-function setPickScope(s){pickScope=s;try{localStorage.setItem(PICK_SCOPE_KEY,s);}catch(e){}pickReroll();}
+function pickReroll(){
+  syncPickList();const e=currentPick(),list=pickKnowledgePoints(pickCount,e.ids,true);
+  e.ids=list.map(n=>n.id);rememberPicks(list);syncPickList();writeCurrent();renderPickModal();
+}
+function setPickCount(count){if(!PICK_NUMS.includes(count)||count===currentPick().count)return;currentPick().count=count;syncPickList(true);writeCurrent();renderPickModal();}
+function setPickScope(scope){if(!['practiced','frontier'].includes(scope)||scope===currentPick().scope)return;currentPick().scope=scope;syncPickList(true);writeCurrent();renderPickModal();}
 function openPickModal(){
   if(pickMask)return;
   pickMask=document.createElement('div');pickMask.className='pick-mask';
@@ -652,16 +712,9 @@ function openPickModal(){
   pickMask.appendChild(box);document.body.appendChild(pickMask);
   pickMask.onclick=e=>{if(e.target===pickMask)closePickModal();};
   window.addEventListener('keydown',pickEsc);
-  const saved=readCurrent(),list=saved?saved.ids.map(id=>N[id]).filter(n=>n):[];
-  if(list.length){
-    calcAll();
-    list.focus=focusTier();
-    list.pool=pickPool(pickCount).length;
-    pickList=list;
-    if(saved.scope==='frontier'||saved.scope==='practiced')pickScope=saved.scope;
-    if(PICK_NUMS.includes(saved.count))pickCount=saved.count;
-    renderPickModal();
-  } else pickReroll();
+  refreshPicks();const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);
+  if(changed||!currentPick().at)writeCurrent();
+  renderPickModal();
 }
 document.getElementById('pickBtn').onclick=openPickModal;
 
@@ -835,7 +888,8 @@ window.addEventListener('message',e=>{
   else if(d.type==='stateChanged'){
     S=load();
     THEME=(()=>{try{return localStorage.getItem('skilltree_theme')==='dark'?'dark':'light';}catch(e){return 'light';}})();
-    pickScope=(()=>{try{return localStorage.getItem(PICK_SCOPE_KEY)==='frontier'?'frontier':'practiced';}catch(e){return 'practiced';}})();
+    dirF=readDirection();document.getElementById('dirSel').value=dirF;
+    pickDoc=readCurrent();syncPickList();
     applyTheme();render();
     if(pickMask)renderPickModal();
   }

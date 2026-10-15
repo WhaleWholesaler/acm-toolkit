@@ -1,13 +1,13 @@
 /* ================= ACM 账号同步（个人 / 团队） =================
    零依赖：状态存 localStorage，服务端只做鉴权与版本控制，客户端负责合并。
-   同步键：技能树进度 / 模板关联 / 抽题历史 / 当前批次 / 范围 / 主题等偏好 */
+   同步键：技能树进度 / 模板关联 / 各方向的抽题批次与设置 / 个人方向 / 主题等偏好 */
 (function () {
 'use strict';
 
 const API_KEY = 'acm_sync_api', TOKEN_KEY = 'acm_sync_token', USER_KEY = 'acm_sync_user',
   SPACE_KEY = 'acm_sync_space', DEVICE_KEY = 'acm_sync_device', META_KEY = 'acm_sync_meta';
 const SYNC_KEYS = ['acm_skilltree_v2', 'acm_link_map', 'acm_skilltree_picks', 'acm_skilltree_current',
-  'acm_skilltree_scope', 'skilltree_theme', 'codeTheme'];
+  'acm_skilltree_scope', 'acm_skilltree_direction', 'skilltree_theme', 'codeTheme'];
 const PUSH_DELAY = 2500, POLL_MS = 1500, PULL_MS = 120000;
 
 const ls = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -104,6 +104,24 @@ function mergePicks(a, b) {
   });
   return out;
 }
+function mergeCurrentPicks(a, b) {
+  const entries = doc => {
+    if (doc && doc.ver === 2 && doc.byDir && typeof doc.byDir === 'object') return doc.byDir;
+    return doc && Array.isArray(doc.ids) ? { all: doc } : {};
+  };
+  const left = entries(a), right = entries(b), out = { ver: 2, byDir: {}, at: 0 };
+  for (const dir of ['all', 'g', 'm', 'd']) {
+    const valid = e => e && typeof e === 'object' && Array.isArray(e.ids);
+    const x = valid(left[dir]) ? left[dir] : null, y = valid(right[dir]) ? right[dir] : null;
+    if (!x && !y) continue;
+    const xa = fieldAt(x, 'at'), ya = fieldAt(y, 'at');
+    // 同一方向整批选较新的；不同方向分别保留。时间相同也必须确定性收敛。
+    out.byDir[dir] = !x ? y : !y ? x : xa !== ya ? (xa > ya ? x : y)
+      : (JSON.stringify(sortObj(x)) >= JSON.stringify(sortObj(y)) ? x : y);
+    out.at = Math.max(out.at, xa, ya);
+  }
+  return out;
+}
 function mergeLinks(a, b) {
   a = a || {}; b = b || {};
   const paths = Object.assign({}, a.paths || {}, b.paths || {});
@@ -138,11 +156,10 @@ function mergeDocs(a, b) {
     else if (k === 'acm_skilltree_picks') out.keys[k] = JSON.stringify(mergePicks(parse(av), parse(bv)));
     else if (k === 'acm_link_map') out.keys[k] = JSON.stringify(mergeLinks(parse(av), parse(bv)));
     else if (k === 'acm_skilltree_current') {
-      const x = parse(av) || {}, y = parse(bv) || {};
-      out.keys[k] = (x.at || 0) >= (y.at || 0) ? av : bv;
+      out.keys[k] = JSON.stringify(mergeCurrentPicks(parse(av), parse(bv)));
     } else {
       const ta = ma[k] || 0, tb = mb[k] || 0;
-      out.keys[k] = ta > tb ? av : (tb > ta ? bv : av);
+      out.keys[k] = ta > tb ? av : (tb > ta ? bv : k === 'acm_skilltree_direction' && String(bv) > String(av) ? bv : av);
     }
   });
   Object.keys(ma).concat(Object.keys(mb)).forEach(k => { out.meta[k] = Math.max(ma[k] || 0, mb[k] || 0); });
@@ -151,6 +168,7 @@ function mergeDocs(a, b) {
 
 /* ---------------- 本地读写 ---------------- */
 function collectDoc() {
+  captureLocalChanges();
   const keys = {};
   SYNC_KEYS.forEach(k => { const v = ls(k); if (v !== null) keys[k] = v; });
   return { v: 1, device, savedAt: Date.now(), keys, meta: Object.assign({}, meta) };
@@ -169,7 +187,7 @@ function applyDoc(doc, replace) {
     });
     if (doc && doc.meta) { meta = Object.assign({}, doc.meta); lsSet(META_KEY, JSON.stringify(meta)); }
   } finally { applying = false; }
-  snap = null;
+  snap = snapshot();
   if (changed.length) notifyChanged(changed);
   return changed;
 }
@@ -201,7 +219,7 @@ function setStatus(s) {
   if (line) line.textContent = '状态：' + STATUS_TEXT[status] + ' · 上次同步：' + fmtTime(lastSync);
   else renderModal();
 }
-function markSynced() { lastSync = Date.now(); dirty = false; }
+function markSynced() { lastSync = Date.now(); dirty = false; clearTimeout(pushTimer); pushTimer = null; }
 function schedulePush(delay) {
   dirty = true;
   if (!token || !space) return;
@@ -264,19 +282,21 @@ function snapshot() {
   SYNC_KEYS.forEach(k => { o[k] = canon(ls(k)); });
   return o;
 }
-function watch() {
+function captureLocalChanges() {
   const now = snapshot();
-  if (snap && token) {
-    let changed = false;
+  let changed = false;
+  if (snap && token && !applying) {
     SYNC_KEYS.forEach(k => {
       if (now[k] !== snap[k]) {
-        if (!applying) { meta[k] = Date.now(); changed = true; }
+        meta[k] = Math.max(Date.now(), (Number(meta[k]) || 0) + 1); changed = true;
       }
     });
-    if (changed) { lsSet(META_KEY, JSON.stringify(meta)); schedulePush(); }
+    if (changed) lsSet(META_KEY, JSON.stringify(meta));
   }
   snap = now;
+  return changed;
 }
+function watch() { if (captureLocalChanges()) schedulePush(); }
 setInterval(watch, POLL_MS);
 window.addEventListener('storage', e => {
   if (e.key === null || SYNC_KEYS.includes(e.key)) schedulePush(400);
@@ -487,7 +507,7 @@ else init();
 
 /* 供测试与调试使用 */
 window.ACMSync = {
-  mergeDocs, mergeTreeState, mergePicks, mergeLinks, collectDoc, applyDoc, canon, logKey, keysEquivalent,
+  mergeDocs, mergeTreeState, mergePicks, mergeCurrentPicks, mergeLinks, collectDoc, applyDoc, canon, logKey, keysEquivalent,
   login, register, logout, switchSpace, syncNow, doPush, doPull, refreshSpaces,
   get status() { return status; }, get space() { return space; }, get user() { return user; },
   get baseRev() { return baseRev; }, get lastSync() { return lastSync; },

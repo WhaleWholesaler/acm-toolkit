@@ -108,7 +108,8 @@ textarea{width:100%;min-height:56px;resize:vertical}
 .pick-box{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:16px 18px;width:min(560px,94vw);max-height:76vh;overflow:auto}
 .pick-box h3{font-size:15px;font-weight:600;margin:0 0 4px;text-transform:none;letter-spacing:0;color:var(--txt)}
 .pick-tip{color:var(--sub);font-size:12px;margin:0 0 10px}
-.pick-count{display:flex;align-items:center;gap:6px;margin:0 0 10px;font-size:12px;color:var(--sub)}
+.pick-count{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 10px;font-size:12px;color:var(--sub)}
+.pick-directions{margin-top:10px}
 .pick-list{display:flex;flex-direction:column;gap:8px}
 .pick-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:pointer;transition:border-color .15s,background .15s}
 .pick-card:hover{border-color:var(--acc);background:var(--hover)}
