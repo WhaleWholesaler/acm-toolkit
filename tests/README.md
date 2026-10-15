@@ -1,6 +1,6 @@
 # 推荐练习浏览器回归
 
-`tree-picks.test.cjs` 使用真实页面、Playwright 和仓库自带的同步服务，覆盖批次保留、分方向推荐、旧数据迁移、双浏览器同账号同步与版本冲突合并。同步服务只监听本机随机端口，使用临时账号与临时数据目录，结束后自动清理。
+`tree-picks.test.cjs` 使用真实页面、Playwright 和仓库自带的同步服务，覆盖批次保留、分方向推荐、已练/未练范围隔离、旧混合缓存清理、记录练习后的范围变更，以及双浏览器同账号同步与按方向/范围的版本冲突合并。同步服务只监听本机随机端口，使用临时账号与临时数据目录，结束后自动清理。
 
 需要 Node.js 18+ 和 Playwright。Windows 默认使用已安装的 Edge；其他平台使用 Playwright Chromium（先运行 `npx playwright install chromium`）。可用 `ACM_BROWSER_CHANNEL` 指定其他已安装的浏览器通道。
 

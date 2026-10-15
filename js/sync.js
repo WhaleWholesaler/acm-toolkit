@@ -105,20 +105,40 @@ function mergePicks(a, b) {
   return out;
 }
 function mergeCurrentPicks(a, b) {
+  const scopes = ['practiced', 'frontier'];
   const entries = doc => {
     if (doc && doc.ver === 2 && doc.byDir && typeof doc.byDir === 'object') return doc.byDir;
     return doc && Array.isArray(doc.ids) ? { all: doc } : {};
   };
+  const normalize = e => {
+    if (!e || typeof e !== 'object' || (!Array.isArray(e.ids) && !e.byScope)) return null;
+    const scope = e.scope === 'frontier' ? 'frontier' : 'practiced', byScope = {};
+    const ids = (a, limit) => Array.isArray(a) ? [...new Set(a.filter(id => typeof id === 'string'))].slice(0, limit) : [];
+    const batch = p => ({ ids: ids(p.ids, 5), history: ids(p.history, 40), count: [3, 4, 5].includes(p.count) ? p.count : 4, at: fieldAt(p, 'at') });
+    if (e.byScope && typeof e.byScope === 'object') {
+      scopes.forEach(s => { const p = e.byScope[s]; if (p && Array.isArray(p.ids)) byScope[s] = batch(p); });
+    } else byScope[scope] = batch(e);
+    return { scope, scopeAt: e.scopeAt === undefined ? fieldAt(e, 'at') : fieldAt(e, 'scopeAt'), byScope };
+  };
+  const newer = (x, y, key) => {
+    if (!x) return y;
+    if (!y) return x;
+    const xa = fieldAt(x, key), ya = fieldAt(y, key);
+    return xa !== ya ? (xa > ya ? x : y) : (JSON.stringify(sortObj(x)) >= JSON.stringify(sortObj(y)) ? x : y);
+  };
   const left = entries(a), right = entries(b), out = { ver: 2, byDir: {}, at: 0 };
   for (const dir of ['all', 'g', 'm', 'd']) {
-    const valid = e => e && typeof e === 'object' && Array.isArray(e.ids);
-    const x = valid(left[dir]) ? left[dir] : null, y = valid(right[dir]) ? right[dir] : null;
+    const x = normalize(left[dir]), y = normalize(right[dir]);
     if (!x && !y) continue;
-    const xa = fieldAt(x, 'at'), ya = fieldAt(y, 'at');
-    // 同一方向整批选较新的；不同方向分别保留。时间相同也必须确定性收敛。
-    out.byDir[dir] = !x ? y : !y ? x : xa !== ya ? (xa > ya ? x : y)
-      : (JSON.stringify(sortObj(x)) >= JSON.stringify(sortObj(y)) ? x : y);
-    out.at = Math.max(out.at, xa, ya);
+    const select = e => e && ({ scope: e.scope, scopeAt: e.scopeAt });
+    const selected = newer(select(x), select(y), 'scopeAt'), byScope = {};
+    scopes.forEach(s => {
+      byScope[s] = newer(x && x.byScope[s], y && y.byScope[s], 'at') || { ids: [], history: [], count: 4, at: 0 };
+    });
+    // 每个「方向 × 范围」独立合并；当前范围作为兼容旧客户端的扁平投影。
+    const at = Math.max(selected.scopeAt, ...scopes.map(s => byScope[s].at));
+    out.byDir[dir] = { ...byScope[selected.scope], ...selected, byScope, at };
+    out.at = Math.max(out.at, at);
   }
   return out;
 }

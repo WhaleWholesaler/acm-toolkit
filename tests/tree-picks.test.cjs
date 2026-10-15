@@ -114,14 +114,18 @@ test('增加数量只补缺项，减少后再增加恢复原标签，刷新也�
   assert.deepEqual(await ids(page), five);
 });
 
-test('切换范围及重复点击当前设置不会替换已抽标签', async t => {
+test('切换范围恢复各自批次，重复点击当前设置不会替换标签', async t => {
   const { tree } = await openTree(t);
   await tree.click('#pickBtn');
   const before = await ids(tree);
-  for (const scope of ['frontier', 'frontier', 'practiced', 'practiced']) {
-    await tree.click('[data-scope="' + scope + '"]');
-    assert.deepEqual(await ids(tree), before);
-  }
+  await tree.click('[data-scope="frontier"]');
+  const fresh = await ids(tree);
+  await tree.click('[data-scope="frontier"]');
+  assert.deepEqual(await ids(tree), fresh);
+  await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), before);
+  await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), before);
   await tree.click('[data-cnt="4"]');
   assert.deepEqual(await ids(tree), before);
 });
@@ -153,8 +157,8 @@ test('综合与个人方向各自保存批次、设置和历史', async t => {
   await tree.click('#pickBtn');
   const all = await ids(tree);
   await tree.click('[data-pick-dir="g"]');
-  await tree.click('[data-cnt="3"]');
   await tree.click('[data-scope="frontier"]');
+  await tree.click('[data-cnt="3"]');
   const graph = await ids(tree), savedGraph = (await doc(tree)).byDir.g;
   await tree.click('[data-pick-dir="m"]');
   await tree.click('[data-cnt="5"]');
@@ -244,7 +248,7 @@ test('旧版单批次迁入综合方向，切 DS 不会复用数学', async t =>
   assert.deepEqual((await doc(tree)).byDir.all.history, ['gcd']);
 });
 
-test('未开始也能抽新知识点，切回已练范围仍保留当前批次', async t => {
+test('范围隔离：未练批次不能出现在已练范围，切回未练恢复原批次', async t => {
   const { tree } = await openTree(t, { levels: {} });
   await tree.click('#pickBtn');
   assert.deepEqual(await ids(tree), []);
@@ -252,7 +256,85 @@ test('未开始也能抽新知识点，切回已练范围仍保留当前批次',
   const before = await ids(tree);
   assert.equal(before.length, 4);
   await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), [], '没有练习或自评时，已练范围必须为空');
+  await tree.click('[data-scope="frontier"]');
   assert.deepEqual(await ids(tree), before);
+});
+
+test('两个范围互斥且各自保留数量、隐藏尾项与抽取历史', async t => {
+  const { page, tree } = await openTree(t);
+  await tree.selectOption('#dirSel', 'g');
+  await tree.click('#pickBtn');
+  const practicedIds = await ids(tree);
+  const practicedState = (await doc(tree)).byDir.g.byScope.practiced;
+  await tree.click('[data-scope="frontier"]');
+  assert.ok(await tree.evaluate(() => pickList.every(n => !hasPractice(n))));
+  await tree.click('[data-cnt="5"]');
+  const freshFive = await ids(tree);
+  assert.equal(freshFive.length, 5);
+  assert.ok(freshFive.every(id => !practicedIds.includes(id)));
+  await tree.click('[data-cnt="3"]');
+  assert.deepEqual(await ids(tree), freshFive.slice(0, 3));
+  assert.deepEqual((await doc(tree)).byDir.g.byScope.practiced, practicedState);
+  await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), practicedIds);
+  assert.ok(await tree.evaluate(() => pickList.every(hasPractice)));
+  assert.equal(await selected(tree, 'data-cnt'), '4');
+  await page.reload();
+  await page.click('#pickBtn');
+  await page.click('[data-scope="frontier"]');
+  assert.deepEqual(await ids(page), freshFive.slice(0, 3));
+  await page.click('[data-cnt="5"]');
+  assert.deepEqual(await ids(page), freshFive);
+});
+
+test('全部已有自评时，未练范围必须为空且换批不回退到已练', async t => {
+  const { tree } = await openTree(t, { levels: 'all' });
+  await tree.click('#pickBtn');
+  const practicedIds = await ids(tree);
+  await tree.click('[data-scope="frontier"]');
+  assert.deepEqual(await ids(tree), []);
+  await tree.click('#pickReroll');
+  assert.deepEqual(await ids(tree), []);
+  await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), practicedIds);
+});
+
+test('旧版混合缓存恢复时清理越界标签，刷新和切方向也不会带回', async t => {
+  for (const scope of ['practiced', 'frontier']) {
+    const { page, tree } = await openTree(t, {
+      levels: { bit: 1 },
+      storage: {
+        acm_skilltree_direction: 'g',
+        acm_skilltree_current: JSON.stringify({ ver: 2, byDir: { g: { ids: ['bit', 'seg1'], history: ['bit', 'seg1'], count: 3, scope, at: 123 } } }),
+      },
+    });
+    await tree.click('#pickBtn');
+    const expected = scope === 'practiced' ? ['bit'] : ['seg1'];
+    assert.deepEqual(await ids(tree), expected);
+    await tree.click('[data-pick-dir="m"]');
+    await tree.click('[data-pick-dir="g"]');
+    assert.deepEqual(await ids(tree), expected);
+    await page.reload();
+    await page.click('#pickBtn');
+    assert.deepEqual(await ids(page), expected);
+    assert.deepEqual((await doc(page)).byDir.g.byScope[scope].ids, expected);
+  }
+});
+
+test('记录新知识点第一题后，它离开未练范围并可在已练范围找到', async t => {
+  const { tree } = await openTree(t, { levels: {} });
+  await tree.selectOption('#dirSel', 'g');
+  await tree.click('#pickBtn');
+  await tree.click('[data-scope="frontier"]');
+  const before = await ids(tree), learned = before[0];
+  await tree.locator('.pick-card').first().click();
+  await tree.click('#quick');
+  await tree.click('#pickBtn');
+  assert.deepEqual(await ids(tree), before.slice(1));
+  assert.ok(await tree.evaluate(() => pickList.every(n => !hasPractice(n))));
+  await tree.click('[data-scope="practiced"]');
+  assert.deepEqual(await ids(tree), [learned]);
 });
 
 test('重置清空所有方向的批次与内存缓存', async t => {
@@ -287,14 +369,14 @@ test('旧新结构与同时间冲突合并可收敛，且不同方向分别保�
 });
 
 test('两个独立浏览器登录同一账号，实时批次/设置一致且并发改不同方向不丢失', async t => {
-  const a = await openTree(t, { host: true, levels: 'all' });
+  const a = await openTree(t, { host: true });
   const b = await openTree(t, { host: true, levels: {} });
   await a.page.evaluate(() => ACMSync.register('picks_shared', 'local-test-password'));
   await b.page.evaluate(() => ACMSync.login('picks_shared', 'local-test-password'));
   await a.tree.click('#pickBtn');
   await a.tree.click('[data-pick-dir="g"]');
-  await a.tree.click('[data-cnt="5"]');
   await a.tree.click('[data-scope="frontier"]');
+  await a.tree.click('[data-cnt="5"]');
   const graph = await ids(a.tree), graphEntry = (await doc(a.tree)).byDir.g;
   // B 的弹窗保持打开，拉取后必须直接反映 A 的当前方向与批次。
   await b.tree.click('#pickBtn');
@@ -310,6 +392,7 @@ test('两个独立浏览器登录同一账号，实时批次/设置一致且并�
   await a.tree.click('[data-cnt="3"]');
   const graphThree = (await doc(a.tree)).byDir.g;
   await b.tree.click('[data-pick-dir="m"]');
+  await b.tree.click('[data-scope="frontier"]');
   await b.tree.click('[data-cnt="5"]');
   const math = (await doc(b.tree)).byDir.m;
   await sync(a.page, 'doPush');
@@ -335,8 +418,8 @@ test('拉取后立即修改方向也会自动推送，另一电脑获取相同�
   await b.tree.click('#pickBtn');
   const rev = await b.page.evaluate(() => ACMSync.baseRev);
   await b.tree.click('[data-pick-dir="d"]');
-  await b.tree.click('[data-cnt="3"]');
   await b.tree.click('[data-scope="frontier"]');
+  await b.tree.click('[data-cnt="3"]');
   const expected = (await doc(b.tree)).byDir.d;
   await b.page.waitForFunction(rev => ACMSync.baseRev > rev && ACMSync.status === 'ok', rev, { timeout: 15000 });
   await sync(a.page, 'doPull');
@@ -345,4 +428,67 @@ test('拉取后立即修改方向也会自动推送，另一电脑获取相同�
   assert.deepEqual((await doc(a.tree)).byDir.d, expected);
   assert.equal(await selected(a.tree, 'data-cnt'), '3');
   assert.equal(await selected(a.tree, 'data-scope'), 'frontier');
+});
+
+test('同方向的已练和未练范围并发修改分别合并，两台电脑恢复相同结果', async t => {
+  const a = await openTree(t, { host: true });
+  const b = await openTree(t, { host: true, levels: {} });
+  await a.page.evaluate(() => ACMSync.register('picks_scopes', 'local-test-password'));
+  await a.tree.selectOption('#dirSel', 'g');
+  await a.tree.click('#pickBtn');
+  await a.tree.click('[data-cnt="3"]');
+  await a.tree.click('[data-scope="frontier"]');
+  await a.tree.click('[data-cnt="5"]');
+  await sync(a.page, 'doPush');
+  await b.page.evaluate(() => ACMSync.login('picks_scopes', 'local-test-password'));
+  await waitDirection(b.tree, 'g');
+  await b.tree.click('#pickBtn');
+  await a.tree.click('[data-scope="practiced"]');
+  await a.tree.click('[data-cnt="4"]');
+  const practicedState = (await doc(a.tree)).byDir.g.byScope.practiced;
+  await b.tree.click('#pickReroll');
+  const freshState = (await doc(b.tree)).byDir.g.byScope.frontier;
+  await sync(a.page, 'doPush');
+  await sync(b.page, 'doPush');
+  await sync(a.page, 'doPull');
+  await a.tree.waitForFunction(() => document.querySelector('[data-scope="frontier"]').classList.contains('pri'));
+  const merged = await doc(a.tree);
+  assert.deepEqual(merged.byDir.g.byScope.practiced, practicedState);
+  assert.deepEqual(merged.byDir.g.byScope.frontier, freshState);
+  assert.deepEqual(await doc(b.tree), merged);
+  assert.ok(await a.tree.evaluate(() => pickList.every(n => !hasPractice(n))));
+  await a.tree.click('[data-scope="practiced"]');
+  await sync(a.page, 'doPush');
+  await sync(b.page, 'doPull');
+  await b.tree.waitForFunction(() => document.querySelector('[data-scope="practiced"]').classList.contains('pri'));
+  assert.deepEqual(await ids(a.tree), practicedState.ids.slice(0, practicedState.count));
+  assert.deepEqual(await ids(b.tree), await ids(a.tree));
+  assert.ok(await b.tree.evaluate(() => pickList.every(hasPractice)));
+});
+
+test('仅切换范围不会把旧批次标成新修改并覆盖另一电脑的换批', async t => {
+  const a = await openTree(t, { host: true });
+  const b = await openTree(t, { host: true, levels: {} });
+  await a.page.evaluate(() => ACMSync.register('picks_select', 'local-test-password'));
+  await a.tree.selectOption('#dirSel', 'g');
+  await a.tree.click('#pickBtn');
+  await a.tree.click('[data-cnt="3"]');
+  const original = (await doc(a.tree)).byDir.g.byScope.practiced;
+  await a.tree.click('[data-scope="frontier"]');
+  await sync(a.page, 'doPush');
+  await b.page.evaluate(() => ACMSync.login('picks_select', 'local-test-password'));
+  await waitDirection(b.tree, 'g');
+  await b.tree.click('#pickBtn');
+  await a.tree.click('[data-scope="practiced"]');
+  await a.tree.click('#pickReroll');
+  const updated = (await doc(a.tree)).byDir.g.byScope.practiced;
+  assert.notDeepEqual(updated.ids, original.ids);
+  await b.tree.click('[data-scope="practiced"]');
+  assert.deepEqual((await doc(b.tree)).byDir.g.byScope.practiced, original);
+  await sync(a.page, 'doPush');
+  await sync(b.page, 'doPush');
+  await sync(a.page, 'doPull');
+  assert.deepEqual((await doc(b.tree)).byDir.g.byScope.practiced, updated);
+  assert.deepEqual((await doc(a.tree)).byDir.g.byScope.practiced, updated);
+  assert.deepEqual(await ids(b.tree), updated.ids);
 });

@@ -523,13 +523,34 @@ let toastT=null;function toast(msg){const t=document.getElementById('toast');t.t
 
 /* ================= 练什么（智能抽取） ================= */
 const PICK_KEY='acm_skilltree_picks',PICK_SCOPE_KEY='acm_skilltree_scope',PICK_CUR_KEY='acm_skilltree_current',PICK_NUMS=[3,4,5];
-const PICK_DIRS=['all','g','m','d'];
+const PICK_DIRS=['all','g','m','d'],PICK_SCOPES=['practiced','frontier'];
 let pickMask=null,pickCount=4,pickList=[],pickScope='practiced',pickDoc=readCurrent();
 function inDirection(n,dir=dirF){return dir==='all'||n.dirv===dir||n.dirv==='a';}
 function cleanPickIds(ids,dir,limit){return Array.isArray(ids)?[...new Set(ids.filter(id=>typeof id==='string'&&Object.hasOwn(N,id)&&N[id].t>0&&inDirection(N[id],dir)))].slice(0,limit):[];}
-function emptyPick(){return {ids:[],history:[],scope:'practiced',count:4,at:0};}
-function readCurrent(){
+function emptyPick(){return {ids:[],history:[],count:4,at:0};}
+function pickDirection(scope='practiced',scopeAt=0,byScope={}){
+  PICK_SCOPES.forEach(s=>{if(!byScope[s])byScope[s]=emptyPick();});
+  // 保留当前范围的扁平投影，兼容旧版客户端的方向结构。
+  return {...byScope[scope],scope,scopeAt,byScope,at:Math.max(scopeAt,...PICK_SCOPES.map(s=>byScope[s].at))};
+}
+function newerPick(a,b,atKey='at'){
+  if(!a)return b;if(!b)return a;
+  const x=a[atKey]||0,y=b[atKey]||0;
+  return x!==y?(x>y?a:b):JSON.stringify(a,Object.keys(a).sort())>=JSON.stringify(b,Object.keys(b).sort())?a:b;
+}
+function mergePickDirection(a,b){
+  if(!a)return b;if(!b)return a;
+  const selected=newerPick({scope:a.scope,scopeAt:a.scopeAt},{scope:b.scope,scopeAt:b.scopeAt},'scopeAt');
+  const byScope={};PICK_SCOPES.forEach(s=>byScope[s]=newerPick(a.byScope[s],b.byScope[s]));
+  return pickDirection(selected.scope,selected.scopeAt,byScope);
+}
+function pickDocument(){
   const doc={ver:2,byDir:{},at:0};
+  Object.defineProperty(doc,'migrated',{value:false,writable:true});
+  return doc;
+}
+function readCurrent(){
+  const doc=pickDocument();
   try{
     const o=JSON.parse(localStorage.getItem(PICK_CUR_KEY));
     let entries=o&&o.ver===2&&o.byDir&&typeof o.byDir==='object'?o.byDir:null;
@@ -540,30 +561,44 @@ function readCurrent(){
     }
     PICK_DIRS.forEach(dir=>{
       const e=entries&&entries[dir];if(!e||typeof e!=='object')return;
-      const at=Number.isFinite(e.at)&&e.at>0?e.at:0;
-      doc.byDir[dir]={ids:cleanPickIds(e.ids,dir,5),history:cleanPickIds(e.history,dir,40),scope:e.scope==='frontier'?'frontier':'practiced',count:PICK_NUMS.includes(e.count)?e.count:4,at};
-      doc.at=Math.max(doc.at,at);
+      const scope=e.scope==='frontier'?'frontier':'practiced',byScope={};
+      const time=v=>Number.isFinite(v)&&v>0?v:0;
+      const clean=p=>({ids:cleanPickIds(p.ids,dir,5),history:cleanPickIds(p.history,dir,40),count:PICK_NUMS.includes(p.count)?p.count:4,at:time(p.at)});
+      if(e.byScope&&typeof e.byScope==='object'){
+        PICK_SCOPES.forEach(s=>{const p=e.byScope[s];if(p&&Array.isArray(p.ids))byScope[s]=clean(p);});
+      }else{byScope[scope]=clean(e);doc.migrated=true;}
+      doc.byDir[dir]=pickDirection(scope,time(e.scopeAt===undefined?e.at:e.scopeAt),byScope);
+      doc.at=Math.max(doc.at,doc.byDir[dir].at);
     });
   }catch(e){}
   return doc;
 }
-function currentPick(){return pickDoc.byDir[dirF]||(pickDoc.byDir[dirF]=emptyPick());}
+function currentDirection(){return pickDoc.byDir[dirF]||(pickDoc.byDir[dirF]=pickDirection());}
+function currentPick(){const e=currentDirection();return e.byScope[e.scope];}
 function refreshPicks(){
   const latest=readCurrent();
-  PICK_DIRS.forEach(dir=>{const e=latest.byDir[dir];if(e&&(!pickDoc.byDir[dir]||e.at>pickDoc.byDir[dir].at))pickDoc.byDir[dir]=e;});
+  PICK_DIRS.forEach(dir=>{if(latest.byDir[dir])pickDoc.byDir[dir]=mergePickDirection(pickDoc.byDir[dir],latest.byDir[dir]);});
+  pickDoc.migrated=pickDoc.migrated||latest.migrated;
+  pickDoc.at=Math.max(0,...Object.values(pickDoc.byDir).map(e=>e.at));
 }
-function writeCurrent(){
-  const e=currentPick(),at=e.at;
+function writeCurrent(batchChanged=true){
+  const scope=currentDirection().scope,e=currentPick();
   refreshPicks();
-  e.at=Math.max(Date.now(),at+1,currentPick().at+1);
-  pickDoc.byDir[dirF]=e;
+  const dir=currentDirection();
+  if(batchChanged){
+    e.at=Math.max(Date.now(),e.at+1,dir.byScope[scope].at+1);
+    dir.byScope[scope]=e;
+  }
+  pickDoc.byDir[dirF]=pickDirection(scope,Math.max(Date.now(),dir.scopeAt+1),dir.byScope);
   pickDoc.at=Math.max(...Object.values(pickDoc.byDir).map(p=>p.at));
-  try{localStorage.setItem(PICK_CUR_KEY,JSON.stringify(pickDoc));}catch(err){}
+  try{localStorage.setItem(PICK_CUR_KEY,JSON.stringify(pickDoc));pickDoc.migrated=false;}catch(err){}
 }
 function rememberPicks(nodes){const e=currentPick();e.history=[...new Set(nodes.map(n=>n.id).concat(e.history))].slice(0,40);}
 function resetPicks(){
+  refreshPicks();
   const at=Math.max(Date.now(),pickDoc.at+1);
-  pickDoc={ver:2,byDir:Object.fromEntries(PICK_DIRS.map(dir=>[dir,{...emptyPick(),at}])),at};
+  pickDoc=pickDocument();pickDoc.at=at;
+  pickDoc.byDir=Object.fromEntries(PICK_DIRS.map(dir=>[dir,pickDirection('practiced',at,Object.fromEntries(PICK_SCOPES.map(scope=>[scope,{...emptyPick(),at}])))]));
   pickList=[];pickCount=4;pickScope='practiced';
   try{localStorage.removeItem(PICK_KEY);localStorage.removeItem(PICK_SCOPE_KEY);localStorage.setItem(PICK_CUR_KEY,JSON.stringify(pickDoc));}catch(e){}
   renderPickModal();
@@ -586,9 +621,11 @@ function frontierTier(){
 }
 function majorOf(n){let x=n;while(x&&x.depth!==2&&x.p)x=N[x.p];return x?x.id:'';}
 function levelOf(n){const s=S.nodes[n.id];return s&&s.level?s.level:0;}
+function hasPractice(n){const s=st(n.id);return s.logs.length>0||s.level>0;}
+function inPickScope(n,scope=pickScope){return scope==='practiced'?hasPractice(n):!hasPractice(n);}
 function pickPool(){
   const cap=Math.min(maxTier,3),fr=frontierTier();
-  return LEAVES.filter(n=>!n.locked&&n.t<=cap&&inDirection(n)&&(blockF==='all'||n.block&&n.block.id===blockF)&&(pickScope==='practiced'?n.calc.base>0:n.calc.base>0||n.t<=fr));
+  return LEAVES.filter(n=>!n.locked&&n.t<=cap&&inDirection(n)&&(blockF==='all'||n.block&&n.block.id===blockF)&&inPickScope(n)&&(pickScope==='practiced'||n.t<=fr));
 }
 function pickWeight(n,focus,hist){
   const c=n.calc;
@@ -640,8 +677,10 @@ function pickKnowledgePoints(k,exclude,allowPrevious=false){
 // ids 保留本批次最多 5 个位置；减小数量只隐藏尾项，增大时恢复或补齐。
 function syncPickList(fill=false){
   calcAll();
-  const e=currentPick();pickCount=e.count;pickScope=e.scope;
-  let changed=false;
+  const e=currentPick();pickCount=e.count;pickScope=currentDirection().scope;
+  const valid=cleanPickIds(e.ids,dirF,5).filter(id=>inPickScope(N[id]));
+  let changed=valid.length!==e.ids.length||valid.some((id,i)=>id!==e.ids[i]);
+  e.ids=valid;
   if(fill&&e.ids.length<pickCount){
     const more=pickKnowledgePoints(pickCount-e.ids.length,e.ids);
     if(more.length){e.ids.push(...more.map(n=>n.id));rememberPicks(more);changed=true;}
@@ -655,7 +694,7 @@ function setDirection(dir){
   dirF=dir;document.getElementById('dirSel').value=dir;
   try{localStorage.setItem(DIRECTION_KEY,dir);}catch(e){}
   render();
-  if(pickMask){refreshPicks();const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);if(changed||!e.at)writeCurrent();renderPickModal();}
+  if(pickMask){refreshPicks();const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);if(changed||!e.at||pickDoc.migrated)writeCurrent(changed||!e.at);renderPickModal();}
 }
 function closePickModal(){
   if(!pickMask)return;
@@ -675,20 +714,20 @@ function renderPickModal(){
       <div class="pick-desc">${esc(n.d)}</div>
     </div>`;
   }).join('');
-  const empty=pickScope==='practiced'?'当前方向和筛选下还没有练过或自评过的知识点：先记录 / 自评，或切到「含新知识点」。':'当前方向和筛选下暂无可抽取的知识点，可调整板块或目标层级。';
+  const empty=pickScope==='practiced'?'当前方向和筛选下还没有练过或自评过的知识点：先记录 / 自评，或切到「未练新知识点」。':'当前方向和筛选下没有可抽取的未练知识点，可调整板块或目标层级。';
   const poolN=pickList.pool!=null?pickList.pool:pickList.length;
   const short=pickList.length>0&&pickList.length<pickCount;
   const small=pickList.length>0&&!short&&poolN<pickCount*2;
-  const tail=pickScope==='practiced'?'可切「含新知识点」或补充本方向的练习记录。':'可调整板块、目标层级，或补充本方向的练习记录。';
+  const tail=pickScope==='practiced'?'可切「未练新知识点」或补充本方向的练习记录。':'可调整板块、目标层级。';
   const shortNote=short
     ?`本批保留 ${pickList.length} 个知识点，当前候选不足以补到 ${pickCount} 个；${tail}`
     :`当前候选只有 ${poolN} 个，换一批可能重复；${tail}`;
   box.innerHTML=`<h3>🎲 今天练什么</h3>
     <div class="pick-count pick-directions"><span>个人方向</span>${PICK_DIRS.map(dir=>`<button class="mini${dir===dirF?' pri':''}" data-pick-dir="${dir}" aria-pressed="${dir===dirF}">${dir==='all'?'综合':DIRN[dir]+'手'}</button>`).join('')}</div>
-    <p class="pick-tip">${dirF==='all'?'综合方向覆盖所有方向。':'只推荐本方向与通用基础，候选不足时少推几个。'}优先薄弱、久未复习；「含新知识点」加入本方向${TIERN[frontierTier()]}牌层未开始的知识点。</p>
-    <div class="pick-count"><span>抽取范围</span><button class="mini${pickScope==='practiced'?' pri':''}" data-scope="practiced">已练过/自评</button><button class="mini${pickScope==='frontier'?' pri':''}" data-scope="frontier">含新知识点</button></div>
+    <p class="pick-tip">${dirF==='all'?'综合方向覆盖所有方向。':'只推荐本方向与通用基础，候选不足时少推几个。'}已练范围只抽有练习或自评的知识点；未练范围只抽无记录且未自评、本方向${TIERN[frontierTier()]}牌层以内的知识点。</p>
+    <div class="pick-count"><span>练习范围</span><button class="mini${pickScope==='practiced'?' pri':''}" data-scope="practiced">已练过/自评</button><button class="mini${pickScope==='frontier'?' pri':''}" data-scope="frontier">未练新知识点</button></div>
     <div class="pick-count"><span>抽取数量</span>${PICK_NUMS.map(x=>`<button class="mini${x===pickCount?' pri':''}" data-cnt="${x}">${x}</button>`).join('')}</div>
-    <p class="pick-tip">当前批次保留到主动「换一批」；增加数量只补缺项，减少后可恢复。范围与树上筛选用于补题和下一批，不会替换已抽标签。各方向的批次和设置随账号同步。</p>
+    <p class="pick-tip">每个方向的两个练习范围独立保留批次、数量和历史，切回来恢复原批次；增加数量只补缺项，减少后可恢复。练习/自评状态改变时会移除不再符合范围的标签。批次和设置随账号同步。</p>
     <div class="pick-list">${cards||`<p class="pick-empty">${empty}</p>`}</div>
     ${short||small?`<p class="pick-note">${shortNote}</p>`:''}
     <div class="pick-btns"><button class="pri" id="pickReroll">换一批</button><button id="pickClose">关闭</button></div>`;
@@ -703,8 +742,13 @@ function pickReroll(){
   syncPickList();const e=currentPick(),list=pickKnowledgePoints(pickCount,e.ids,true);
   e.ids=list.map(n=>n.id);rememberPicks(list);syncPickList();writeCurrent();renderPickModal();
 }
-function setPickCount(count){if(!PICK_NUMS.includes(count)||count===currentPick().count)return;currentPick().count=count;syncPickList(true);writeCurrent();renderPickModal();}
-function setPickScope(scope){if(!['practiced','frontier'].includes(scope)||scope===currentPick().scope)return;currentPick().scope=scope;syncPickList(true);writeCurrent();renderPickModal();}
+function setPickCount(count){if(!PICK_NUMS.includes(count))return;refreshPicks();if(count===currentPick().count)return;currentPick().count=count;syncPickList(true);writeCurrent();renderPickModal();}
+function setPickScope(scope){
+  if(!PICK_SCOPES.includes(scope))return;
+  refreshPicks();if(scope===currentDirection().scope)return;
+  currentDirection().scope=scope;
+  const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);writeCurrent(changed||!e.at);renderPickModal();
+}
 function openPickModal(){
   if(pickMask)return;
   pickMask=document.createElement('div');pickMask.className='pick-mask';
@@ -713,7 +757,7 @@ function openPickModal(){
   pickMask.onclick=e=>{if(e.target===pickMask)closePickModal();};
   window.addEventListener('keydown',pickEsc);
   refreshPicks();const e=currentPick(),changed=syncPickList(!e.at||!e.ids.length);
-  if(changed||!currentPick().at)writeCurrent();
+  if(changed||!currentPick().at||pickDoc.migrated)writeCurrent(changed||!currentPick().at);
   renderPickModal();
 }
 document.getElementById('pickBtn').onclick=openPickModal;
@@ -889,7 +933,7 @@ window.addEventListener('message',e=>{
     S=load();
     THEME=(()=>{try{return localStorage.getItem('skilltree_theme')==='dark'?'dark':'light';}catch(e){return 'light';}})();
     dirF=readDirection();document.getElementById('dirSel').value=dirF;
-    pickDoc=readCurrent();syncPickList();
+    pickDoc=readCurrent();if(syncPickList())writeCurrent();
     applyTheme();render();
     if(pickMask)renderPickModal();
   }
